@@ -1,0 +1,81 @@
+syms ZS(x) ZP(x) E(x) H(x); %%Declaring variables for ODE
+u = 4*pi*1e-7; r =  8.854e-12; %%Universal Constants
+f = input('Please enter a frequency in hertz: '); %%The following are all 
+
+parameters that the user can control through the command line
+while (isscalar(f) == 0 || (f < 0) || (isreal(f) == 0)) %%Makes sures that the frequency is a positive, real scalar
+f = input('Please enter a real value greater than 0: ');
+end
+
+
+w   = 2*pi*f;
+d = input('Please enter an angle in degrees between 0 and 90: ');
+while (isscalar(d) == 0 || (d >= 90) || (d < 0) || (isreal(d) == 0)) %%Makes sures that the angle is a real number between 0 and 90 degrees.
+    d = input('Please enter an angle in degrees between 0 and 90: ');
+end
+L = input('How long do you want the slab to be in terms of number of wavelengths of the light in a vacuum?: ');
+while (isscalar(L) == 0 || (L < 0) || (isreal(L) == 0))
+    f = input('Please enter a real value greater than 0: ');
+end
+s = sind(d);
+funstr1 = input('Please enter the relative permitivitty of the slab as a function of position: ', 's');
+p1 = r*str2sym(funstr1);
+funstr2 = input('Please enter the relative permeability of the slab as a function of position: ', 's');
+p2 = u*str2sym(funstr2);
+EIS = input('Please enter the magnitude of the perpendicular polarization component: ');
+while (isscalar(EIS) == 0 || (EIS < 0) || (isreal(EIS) == 0))
+    EIS = input('Please enter a real value greater than 0: ');
+end
+EIP = input('Please enter the magnitude of the parallel polarization component: ');
+while (isscalar(EIP) == 0 || (EIP < 0) || (isreal(EIP) == 0))
+    EIP = input('Please enter a real value greater than 0: ');
+end
+Z0S  = (u/r)^(1/2)*secd(d); %%Intrinsic wave impedance perpendicular polarization
+Z0P  = (u/r)^(1/2)*cosd(d); %%Intrinsic wave impedance parallel polarization
+%%OT = asin(sind(eval(d))/
+x = linspace(0,L*3e8/f,1000); %%Length of the slab
+odeS = diff(ZS) == -1i*w*p2+1i*w*(p1-u*r*s^2*((p2)^(-1)))*(ZS)^2; %%Differential for perpendicular polarization wave impedance
+VS = odeToVectorField(odeS); %%Converts ode into a vector field so that it can be solved numerically
+FS = matlabFunction(VS,'vars',{'x','Y'});
+solS = ode45(FS,[L*3e8/f 0],Z0S); %%Solves ODE using R-K 4th or 5th order
+yS = deval(solS,x); %%Use this to create a vector with the solutions over the specified line space.
+odeP = diff(ZP) == -1i*w*p1*(ZP)^2+1i*w*(p2-u*r*s^2*((p1)^(-1))); %%Differential for parallel polarization wave impedance
+
+VP = odeToVectorField(odeP);
+FP = matlabFunction(VP,'vars',{'x','Y'});
+solP = ode45(FP,[L*3e8/f 0],Z0P);
+yP = deval(solP,x);
+RES = @(x) (deval(solS,x)-Z0S)./(deval(solS,x)+Z0S); %%Reflection Coefficient for perpendicular polarization
+
+REP = @(x) (deval(solP,x)-Z0P)./(deval(solP,x)+Z0P); %%Reflection Coefficient for parallel polarization
+RES2 = (deval(solS,x)-Z0S)./(deval(solS,x)+Z0S);
+ep0 = double(subs(p1,0)/(8.854e-12)); %%Permittivity at the first boundary
+up0 = double(subs(p2,0)/(4*pi*1e-7)); %%Permeability at the first boundary
+eup0 = (ep0*up0).^(1/2); %%Refractive Index
+otr = asin(sind(double(d))/double(eup0)); %%Transmission angle at the boundary
+A = eup0*sin(otr);
+N = (double(eval(p2)).*double(eval(p1))/(8.854e-12*4*pi*1e-7)).^(1/2); %%Refractive index as a function of position
+YI = ((N./A).^(2)-1).^(1/2); %%Inhomogeneous term in the Euler-Lagrange equation
+R = size(YI);
+if (R(:,2) == 1) %%This was to correct for an error when the permittivity or permeability were given as constants
+    YI = YI.*ones(1,1000);
+end
+ZMAX = .0001*L*3e8/f; %%This code is to solve the inverse problem of finding for what z value the ray crosses the slab
+Zlin = linspace(0,ZMAX,1000);
+while (cumtrapz(Zlin,YI) < L*3e8/f)
+    ZMAX = (ZMAX+.001)*1.01;
+    Zlin = linspace(0,ZMAX,1000);
+end
+Y = cumtrapz(Zlin,YI); %%Ray path in terms of X
+TS = RES(0)+1; %%Boundary condition for perpendicular polarization
+MM  = cos(otr);
+TP  = (1+REP(0))*cosd(double(d))/MM; %%Boundary condition parallel polarization
+y2S = yS.^(-1).*double(eval(p2));
+y2p = yP.^(-1).*(double(eval(p2))-u*r*sind(d)^2*double(eval(p1)).^(-1));
+ES = cumtrapz(x,y2S);
+MS = TS*EIS*exp(-1i*ES*w); %%Perpendicular polarization E wave
+EP = cumtrapz(x,y2p);
+MP = TP*EIP*exp(1i*EP*w); %%Paralllel polarization E wave
+subplot(3, 1, 1), plot(x,abs(MS), '-'), xlim([0 L*3e8/f]), title('Perpendicular Polarization Total Electric Field Y-Component'), grid, xlabel('X-Position meters'), ylabel('Voltage')
+subplot(3, 1, 2), plot(x,abs(MP), '-'); xlim([0 L*3e8/f]), title('Parallel Polarization Total Electric Field Z-Component'), grid, xlabel('X-Position meters'), ylabel('Voltage')
+subplot(3, 1, 3), plot(Y,Zlin, '-' ); xlim([0 L*3e8/f]), title('Ray Path'), grid, xlabel('X-Position meters'), ylabel('Z position meters')
